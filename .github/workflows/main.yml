@@ -28,8 +28,10 @@ jobs:
                   # Loop through each PR and get its number
                   for i in $(seq 0 $(($COUNT - 1))); do
                       PR_NUMBER=$(echo $PRS | jq ".[$i].number")   
+                      echo "PR_NUMBER: $PR_NUMBER"
                       PR_TITLE=$(echo $PRS | jq -r ".[$i].title")
-
+                      echo "PR_TITLE: $PR_TITLE"
+          
                       # Craft your message body for Teams here
                       MESSAGE_BODY='{
                           "@type": "MessageCard",
@@ -39,6 +41,7 @@ jobs:
                       }'
 
                       # Send the message to Teams
+                      echo "$MESSAGE_BODY: $MESSAGE_BODY"
                       curl -H "Content-Type: application/json" -d "$MESSAGE_BODY" ${{ secrets.TEAMS_WEBHOOK_URL }}
                   done
               fi
