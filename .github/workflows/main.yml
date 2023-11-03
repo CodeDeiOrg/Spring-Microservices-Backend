@@ -12,12 +12,15 @@ jobs:
       - name: Check for open PRs
         run: |
           # Get list of repos
-          REPOS=$(curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" https://api.github.com/orgs/$YOUR_ORG_NAME/repos | jq -r '.[].full_name')
+          REPOS=$(curl -H "Authorization: token $TOKEN" https://api.github.com/orgs/$YOUR_ORG_NAME/repos | jq -r '.[].full_name')
+          echo "List of repos: $REPOS"
 
           # For each repo, check for open PRs
           for REPO in $REPOS; do
-              PRS=$(curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" https://api.github.com/repos/$REPO/pulls)
+              echo "Current repo: $REPO"
+              PRS=$(curl -H "Authorization: token $TOKEN" https://api.github.com/repos/$REPO/pulls)
               COUNT=$(echo $PRS | jq '. | length')
+              echo "Number of opened PRs: $COUNT"
 
               if [ "$COUNT" -gt 0 ]; then
                   echo "Sending Teams notification for repo $REPO with $COUNT open PRs."
@@ -42,5 +45,5 @@ jobs:
           done
         env:
           YOUR_ORG_NAME: CodeDeiOrg
-          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+          TOKEN: ${{ secrets.PAT_TOKEN }}
           TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
