@@ -37,11 +37,11 @@ jobs:
                           "@type": "MessageCard",
                           "@context": "http://schema.org/extensions",
                           "title": "Open PR Alert",
-                          "text": "Repo '$REPO' has an open PR #$PR_NUMBER titled: '$PR_TITLE'."
+                          "text": "Repo '$REPO' has an open PR $PR_NUMBER titled: '$PR_TITLE'."
                       }'
 
                       # Send the message to Teams
-                      echo "$MESSAGE_BODY: $MESSAGE_BODY"
+                      echo "MESSAGE_BODY: $MESSAGE_BODY"
                       curl -H "Content-Type: application/json" -d "$MESSAGE_BODY" ${{ secrets.TEAMS_WEBHOOK_URL }}
                   done
               fi
