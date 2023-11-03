@@ -1,0 +1,46 @@
+name: Scan Repos for Open PRs
+
+on:
+  schedule:
+    - cron: '0 10 * * 1-5' # At 10:00 AM on Monday to Friday
+  workflow_dispatch:
+
+jobs:
+  scanPRs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for open PRs
+        run: |
+          # Get list of repos
+          REPOS=$(curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" https://api.github.com/orgs/${{ secrets.YOUR_ORG_NAME }}/repos | jq -r '.[].full_name')
+
+          # For each repo, check for open PRs
+          for REPO in $REPOS; do
+              PRS=$(curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" https://api.github.com/repos/$REPO/pulls)
+              COUNT=$(echo $PRS | jq '. | length')
+
+              if [ "$COUNT" -gt 0 ]; then
+                  echo "Sending Teams notification for repo $REPO with $COUNT open PRs."
+
+                  # Loop through each PR and get its number
+                  for i in $(seq 0 $(($COUNT - 1))); do
+                      PR_NUMBER=$(echo $PRS | jq ".[$i].number")   
+                      PR_TITLE=$(echo $PRS | jq -r ".[$i].title")
+
+                      # Craft your message body for Teams here
+                      MESSAGE_BODY='{
+                          "@type": "MessageCard",
+                          "@context": "http://schema.org/extensions",
+                          "title": "Open PR Alert",
+                          "text": "Repo '$REPO' has an open PR #$PR_NUMBER titled: '$PR_TITLE'."
+                      }'
+
+                      # Send the message to Teams
+                      curl -H "Content-Type: application/json" -d "$MESSAGE_BODY" ${{ secrets.TEAMS_WEBHOOK_URL }}
+                  done
+              fi
+          done
+        env:
+          YOUR_ORG_NAME: CodeDeiOrg
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
