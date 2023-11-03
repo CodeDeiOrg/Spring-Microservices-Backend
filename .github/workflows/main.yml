@@ -12,7 +12,7 @@ jobs:
       - name: Check for open PRs
         run: |
           # Get list of repos
-          REPOS=$(curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" https://api.github.com/orgs/${{ secrets.YOUR_ORG_NAME }}/repos | jq -r '.[].full_name')
+          REPOS=$(curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" https://api.github.com/orgs/$YOUR_ORG_NAME/repos | jq -r '.[].full_name')
 
           # For each repo, check for open PRs
           for REPO in $REPOS; do
