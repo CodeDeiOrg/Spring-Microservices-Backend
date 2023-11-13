@@ -1,49 +1,131 @@
-name: Scan Repos for Open PRs
+name: Scan Repos for Open PRs and Notify Team
 
 on:
   schedule:
-    - cron: '0 10 * * 1-5' # At 10:00 AM on Monday to Friday
-  workflow_dispatch:
+    # At 11:00 AM on Monday to Friday
+    - cron: '0 11 * * 1-5'
+  pull_request:
+    types: [ opened, reopened ]
 
 jobs:
-  scanPRs:
-    runs-on: ubuntu-latest
+  scanPRsSendTeamNotify:
+    runs-on: self-hosted
     steps:
-      - name: Check for open PRs
+      - name: Fetch all repositories across Eliot
+        id: get_repos
         run: |
-          # Get list of repos
-          REPOS=$(curl -H "Authorization: token $TOKEN" https://api.github.com/orgs/$YOUR_ORG_NAME/repos | jq -r '.[].full_name')
-          echo "List of repos: $REPOS"
-
-          # For each repo, check for open PRs
-          for REPO in $REPOS; do
-              echo "Current repo: $REPO"
-              PRS=$(curl -H "Authorization: token $TOKEN" https://api.github.com/repos/$REPO/pulls)
-              COUNT=$(echo $PRS | jq '. | length')
-              echo "Number of opened PRs: $COUNT"
-
-              if [ "$COUNT" -gt 0 ]; then
-                  echo "Sending Teams notification for repo $REPO with $COUNT open PRs."
-
-                  # Loop through each PR and get its number
-                  for i in $(seq 0 $(($COUNT - 1))); do
-                      PR_NUMBER=$(echo $PRS | jq ".[$i].number")   
-                      PR_TITLE=$(echo $PRS | jq -r ".[$i].title")
-
-                      # Craft your message body for Teams here
-                      MESSAGE_BODY='{
-                          "@type": "MessageCard",
-                          "@context": "http://schema.org/extensions",
-                          "title": "Open PR Alert",
-                          "text": "Repo '$REPO' has an open PR #$PR_NUMBER titled: '$PR_TITLE'."
-                      }'
-
-                      # Send the message to Teams
-                      curl -H "Content-Type: application/json" -d "$MESSAGE_BODY" ${{ secrets.TEAMS_WEBHOOK_URL }}
-                  done
-              fi
+          REPOS=()
+          PAGE=1
+          PER_PAGE=50
+         
+          # Fetch the first page to get the total count
+          DATA=$(curl -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" https://sgithub.fr.world.socgen/api/v3/orgs/Eliot/teams/ft-ews/repos?page=$PAGE&per_page=$PER_PAGE)
+          
+          # Loop until 'DATA' is empty or no 'Link' header with rel="next"
+          while [[ -n "$DATA" ]]; do
+            # Extract repository names and add to 'REPOS' array
+            REPOS+=($(echo "$DATA" | jq -r '.[].full_name'))
+         
+            # Get the 'Link' header from the current page
+            LINK_HEADER=$(curl -s -I -H "Authorization: token $TOKEN" https://sgithub.fr.world.socgen/api/v3/orgs/Eliot/teams/ft-ews/repos?page=$PAGE&per_page=$PER_PAGE | grep '^link:')
+         
+            # Use a regular expression to extract the 'next' URL if it exists
+            if [[ $LINK_HEADER =~ <([^>]+)>;\ rel=\"next\" ]]; then
+              NEXT_PAGE_URL=${BASH_REMATCH[1]}
+              # Fetch the next page
+              DATA=$(curl -s -H "Authorization: token $TOKEN" "$NEXT_PAGE_URL")
+              ((PAGE++))
+            else
+              # No 'next' URL means we are on the last page
+              break
+            fi
           done
+
+          # Print or process the list of repositories
+          echo "Fetched ${#REPOS[@]} repositories"
+          printf "%s\n" "${REPOS[@]}"
+         
+          # Use the list of REPOSITORIES outside of this step
+          echo "::set-output name=repos::$(IFS=$' '; echo "${REPOS[*]}")"
+
+      - name: Check for open PRs and store details
+        id: get_prs
+        run: |
+          PR_DETAILS=() # Array to hold PR details
+          IFS=$' ' read -r -a REPO_ARRAY <<< "$REPOS"
+         
+          for REPO in "${REPO_ARRAY[@]}"; do
+            echo "Current repo: $REPO"
+         
+            # Fetch open PRs for the repository
+            PRS=$(curl -H "Authorization: token $TOKEN" https://sgithub.fr.world.socgen/api/v3/repos/$REPO/pulls?state=open)
+            COUNT=$(echo $PRS | jq '. | length')
+            echo "Number of opened PRs: $COUNT"
+         
+            if [ "$COUNT" -gt 0 ]; then
+              # Loop through each PR and get its number
+              for i in $(seq 0 $(($COUNT - 1))); do
+                PR_TITLE=$(echo $PRS | jq -r ".[$i].title")
+                echo "PR_TITLE: $PR_TITLE"
+         
+                PR_NUMBER=$(echo $PRS | jq ".[$i].number")  
+                echo "PR_NUMBER: $PR_NUMBER"
+         
+                PR_URL=$(echo $PRS | jq -r ".[$i].html_url")
+                echo "PR_URL: $PR_URL"
+
+                # Store the PR details
+                PR_DETAILS+=("$REPO - $PR_TITLE (#$PR_NUMBER) - $PR_URL")
+                echo "PR_DETAILS: $PR_DETAILS"
+              done
+            fi
+          done
+         
+          # Print or process the list of pull requests
+          echo "Fetched ${#PR_DETAILS[@]} pull requests"
+         
+          # Use the list of PR details outside of this step
+          echo "::set-output name=pr_details::$(IFS=$'@'; echo "${PR_DETAILS[*]}")"
         env:
-          YOUR_ORG_NAME: CodeDeiOrg
-          TOKEN: ${{ secrets.PAT_TOKEN }}
-          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOS: ${{ steps.get_repos.outputs.repos }}
+
+      - name: Notify team on TEAMS
+        run: |
+          PR_DETAILS=() # Array to hold PR details
+          IFS=$'@' read -r -a PRS_ARRAY <<< "$PRS"
+
+          # Print or process the list of OPEN PRS
+          echo "Fetched ${#PRS_ARRAY[@]} pull requests"
+          printf "%s\n" "${PRS_ARRAY[@]}"
+         
+          # Create a string JSON for facts
+          facts_array=""
+          index=1
+          
+          for pr in "${PRS_ARRAY[@]}"; do
+            # Add the entire PR string as a value for the fact
+            facts_array+="{\"name\": \"${index}\", \"value\": \"${pr}\"},"
+            ((index++))
+          done
+         
+          # Remove the last comma
+          facts_array=${facts_array%,}
+          echo "FACTS: $facts_array"
+          
+          curl -sSk --connect-timeout 5 --max-time 15 --proxy http://dgfmlx01.dns21.socgen:3336 \
+                      --header 'Content-Type: application/json' \
+                      --data '{
+                          "@type": "MessageCard", "@context": http://schema.org/extensions, "themeColor": "0076D7",
+                          "summary": "Daily Open Pull Request Reminder",
+                          "sections": [{
+                              "activityTitle": "Review Pending Pull Requests",
+                              "activitySubtitle": "A list of pull requests was found",
+                              "activityImage": https://adaptivecards.io/content/cats/3.png,
+                              "facts": '"[$facts_array]"'
+                          }]
+                      }' \
+                      ${{ secrets.MS_TEAMS_WEBHOOK_URL }}
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PRS: ${{ steps.get_prs.outputs.pr_details }}
